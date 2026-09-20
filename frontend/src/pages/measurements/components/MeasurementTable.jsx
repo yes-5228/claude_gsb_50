@@ -42,6 +42,19 @@ export default function MeasurementTable({ rows, loading, onDelete }) {
         row.is_exceeded ? <Tag tone="danger">{formatRatio(row.exceed_ratio)}</Tag> : <Tag tone="success">达标</Tag>
     },
     {
+      key: 'standard',
+      title: '判定标准',
+      className: 'cell-nowrap',
+      render: (row) =>
+        row.standard ? (
+          <span className="small" title={`${row.standard.display_name} · 录入时快照, 不随标准调整变化`}>
+            {row.standard.display_name}
+          </span>
+        ) : (
+          <span className="muted small">默认限值</span>
+        )
+    },
+    {
       key: 'data_source_label',
       title: '来源',
       render: (row) => <Tag tone={DATA_SOURCE_TONE[row.data_source]}>{row.data_source_label}</Tag>

@@ -14,7 +14,7 @@ from ..domain.constants import (
 )
 from ..domain.standards import POLLUTANTS
 from ..extensions import db
-from ..services import exceedance_service, query_service, station_service
+from ..services import exceedance_service, query_service, standard_service, station_service
 
 bp = Blueprint("meta", __name__)
 
@@ -37,9 +37,31 @@ def health():
 
 @bp.get("/pollutants")
 def pollutants():
+    """因子元数据; 限值取当前生效的标准版本 (未配置版本时回退内置默认值)."""
+    version, limits = standard_service.resolve_limits(datetime.now())
+    items = []
+    for item in POLLUTANTS.values():
+        pollutant = dict(item)
+        if limits is not None:
+            version_limits = limits.get(pollutant["code"]) or {}
+            pollutant["limits"] = {
+                period: version_limits.get(period) for period in ("hourly", "daily")
+            }
+        items.append(pollutant)
     return {
-        "items": list(POLLUTANTS.values()),
+        "items": items,
         "policy": current_app.config["LIMIT_POLICY"],
+        "standard": (
+            {
+                "id": version.id,
+                "name": version.name,
+                "grade_label": version.grade_label(),
+                "display_name": version.display_name(),
+                "effective_from": version.effective_from.isoformat(timespec="seconds"),
+            }
+            if version
+            else None
+        ),
         "periods": [{"value": key, "label": label} for key, label in PERIOD_LABELS.items()],
     }
 

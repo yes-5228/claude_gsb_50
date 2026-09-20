@@ -25,14 +25,18 @@ def measurement_summary():
 
 @bp.post("/preview")
 def preview():
-    """干跑校验: 录入表单实时预览超标情况, 不写库."""
+    """干跑校验: 录入表单实时预览超标情况, 不写库.
+
+    按监测时间匹配当时生效的标准版本; 未传监测时间时按当前时间解析.
+    """
     data = json_payload()
     validator = Validator(data)
     period = validator.choice("period", "数据周期", choices=tuple(PERIOD_LABELS.keys()),
                               required=True, default="hourly")
+    measured_at = validator.datetime_field("measured_at", "监测时间", required=False)
     validator.raise_if_invalid()
     entries = list_payload("entries", data)
-    return measurement_service.preview_entries(period or "hourly", entries)
+    return measurement_service.preview_entries(period or "hourly", entries, measured_at)
 
 
 @bp.post("/entries")
@@ -82,6 +86,7 @@ def export_measurements():
         ("限值", "limit_value"),
         ("是否超标", lambda row: "是" if row.is_exceeded else "否"),
         ("超标倍数", "exceed_ratio"),
+        ("判定标准", lambda row: row.standard_version.display_name() if row.standard_version else "内置默认限值"),
         ("监测时间", lambda row: row.measured_at.strftime("%Y-%m-%d %H:%M")),
         ("数据来源", lambda row: DATA_SOURCE_LABELS.get(row.data_source, row.data_source)),
         ("录入人", "recorder"),

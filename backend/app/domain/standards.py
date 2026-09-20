@@ -1,4 +1,10 @@
-"""污染物监测因子与限值定义 (GB 3095-2012 环境空气质量标准, 二级浓度限值)."""
+"""污染物监测因子与限值定义 (GB 3095-2012 环境空气质量标准, 二级浓度限值).
+
+POLLUTANTS 是因子元数据(名称/单位/精度)的权威来源, 同时内置一套默认限值,
+作为数据库中尚未配置任何标准版本时的兜底. 正常运行时, 限值来自
+``standard_versions`` / ``standard_limits`` 表, 由 ``standard_service``
+按监测时间解析后传入判定逻辑.
+"""
 
 # period 取值: hourly = 1 小时平均, daily = 24 小时平均
 POLLUTANTS = {
@@ -60,8 +66,20 @@ def get_pollutant(code):
     return POLLUTANTS.get(str(code or "").upper())
 
 
-def get_limit(code, period):
-    """Return the concentration limit for a pollutant/period pair (None if undefined)."""
+def default_limits():
+    """内置默认限值, 结构与版本限值映射一致: {pollutant: {period: limit}}."""
+    return {code: dict(item["limits"]) for code, item in POLLUTANTS.items()}
+
+
+def get_limit(code, period, limits=None):
+    """Return the concentration limit for a pollutant/period pair (None if undefined).
+
+    ``limits`` 为某标准版本的限值映射 ({pollutant: {period: limit}}); 缺省时
+    使用内置默认限值.
+    """
+    code = str(code or "").upper()
+    if limits is not None:
+        return (limits.get(code) or {}).get(period)
     pollutant = get_pollutant(code)
     if not pollutant:
         return None

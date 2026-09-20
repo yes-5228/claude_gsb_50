@@ -29,8 +29,15 @@ class Measurement(TimestampMixin, db.Model):
     data_source = db.Column(db.String(16), nullable=False, default="manual")
     recorder = db.Column(db.String(64))
     remark = db.Column(db.Text)
+    standard_version_id = db.Column(
+        db.Integer,
+        db.ForeignKey("standard_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     station = db.relationship("Station", back_populates="measurements")
+    standard_version = db.relationship("StandardVersion", back_populates="measurements")
     exceedance = db.relationship(
         "Exceedance",
         back_populates="measurement",
@@ -61,6 +68,18 @@ class Measurement(TimestampMixin, db.Model):
             "data_source_label": label_of(DATA_SOURCE_LABELS, self.data_source),
             "recorder": self.recorder,
             "remark": self.remark,
+            "standard_version_id": self.standard_version_id,
+            "standard": (
+                {
+                    "id": self.standard_version.id,
+                    "name": self.standard_version.name,
+                    "grade": self.standard_version.grade,
+                    "grade_label": self.standard_version.grade_label(),
+                    "display_name": self.standard_version.display_name(),
+                }
+                if self.standard_version
+                else None
+            ),
             "created_at": iso(self.created_at),
             "updated_at": iso(self.updated_at),
             "exceedance_id": self.exceedance.id if self.exceedance else None,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createEntries, previewEntries } from '../../../api/measurements.js'
+import { resolveStandard } from '../../../api/standards.js'
 import { SectionCard } from '../../../components/common/Card.jsx'
 import { Checkbox, Field, Input, Select } from '../../../components/common/FormField.jsx'
 import { Alert, Loading } from '../../../components/common/Feedback.jsx'
@@ -38,6 +39,7 @@ export default function EntryForm({ onPreview, onSubmitted }) {
   const [message, setMessage] = useState(null)
   const [busy, setBusy] = useState(null)
   const [evaluations, setEvaluations] = useState({})
+  const [resolved, setResolved] = useState(null)
 
   const pollutants = pollutantData?.items ?? []
 
@@ -47,13 +49,33 @@ export default function EntryForm({ onPreview, onSubmitted }) {
     }
   }, [stationData, form.station_id])
 
+  // 按监测时间匹配当时生效的标准版本, 限值提示与判定都以该版本为准
+  useEffect(() => {
+    if (!form.measured_at) {
+      setResolved(null)
+      return undefined
+    }
+    let cancelled = false
+    resolveStandard(form.measured_at)
+      .then((payload) => {
+        if (!cancelled) setResolved(payload)
+      })
+      .catch(() => {
+        if (!cancelled) setResolved(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [form.measured_at])
+
   const limitHint = useCallback(
     (pollutant) => {
-      const limit = pollutant.limits?.[form.period]
+      const resolvedLimit = resolved?.limits?.[pollutant.code]?.[form.period]
+      const limit = resolvedLimit ?? pollutant.limits?.[form.period]
       if (limit === null || limit === undefined) return '该周期未设限值, 仅记录数值'
       return `限值 ${formatNumber(limit)} ${pollutant.unit}`
     },
-    [form.period]
+    [form.period, resolved]
   )
 
   const filled = useMemo(
@@ -104,7 +126,11 @@ export default function EntryForm({ onPreview, onSubmitted }) {
     if (!validate()) return
     setBusy('preview')
     try {
-      const result = await previewEntries({ period: form.period, entries })
+      const result = await previewEntries({
+        period: form.period,
+        measured_at: form.measured_at,
+        entries
+      })
       const map = {}
       result.results.forEach((item) => {
         map[item.pollutant] = item
@@ -173,7 +199,16 @@ export default function EntryForm({ onPreview, onSubmitted }) {
     <SectionCard
       title="监测数据录入"
       hint="选择监测点与监测时刻, 一次录入该时刻的各因子浓度"
-      actions={<Tag tone="primary">{form.period === 'hourly' ? '小时均值' : '日均值'}</Tag>}
+      actions={
+        <>
+          {resolved?.version ? (
+            <Tag tone="info" title={`自 ${resolved.version.effective_from} 起生效`}>
+              判定依据: {resolved.version.display_name}
+            </Tag>
+          ) : null}
+          <Tag tone="primary">{form.period === 'hourly' ? '小时均值' : '日均值'}</Tag>
+        </>
+      }
     >
       <div className="stack">
         {stationError ? <Alert tone="error">{stationError.message}</Alert> : null}
@@ -217,7 +252,11 @@ export default function EntryForm({ onPreview, onSubmitted }) {
         <div className="card" style={{ boxShadow: 'none' }}>
           <div className="card-header">
             <h3>因子浓度</h3>
-            <span className="hint">留空的因子不会写入</span>
+            <span className="hint">
+              {resolved?.fallback
+                ? resolved.message
+                : '留空的因子不会写入, 限值按监测时间匹配的标准版本取值'}
+            </span>
           </div>
           <div className="card-body">
             {errors.entries ? <Alert tone="error">{errors.entries}</Alert> : null}

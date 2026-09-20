@@ -77,7 +77,9 @@ def _value(pollutant, period, station_type, rng):
 
 def seed_demo_data(days=5, rng=None, recorder_pool=RECORDERS):
     """Generate demo stations and monitoring records through the normal service path."""
-    from .services import measurement_service
+    from .services import measurement_service, standard_service
+
+    standard_service.ensure_default_versions()
 
     rng = rng or random.Random(20260914)
     created_stations = []
@@ -162,6 +164,9 @@ def ensure_bootstrap(app):
         try:
             if auto_init:
                 db.create_all()
+                from .services import standard_service
+
+                standard_service.ensure_default_versions()
             if auto_seed and db.session.query(Station.id).first() is None:
                 app.logger.info("seeding demo data ...")
                 seed_demo_data()

@@ -1,4 +1,5 @@
 """超标判定规则: 依据污染物限值计算超标倍数并分级."""
+from .constants import PERIOD_LABELS
 from .standards import get_limit, get_pollutant
 
 # 超标倍数 -> 等级
@@ -15,12 +16,15 @@ def grade_ratio(ratio):
     return "light"
 
 
-def evaluate(pollutant_code, period, value):
+def evaluate(pollutant_code, period, value, limits=None):
     """Evaluate a single reading.
 
     Returns a dict: {"applicable", "exceeded", "limit", "ratio", "level", "unit", "message"}.
     ``applicable`` is False when the standard defines no limit for this period
     (e.g. PM2.5 has no 1-hour limit), in which case ``exceeded`` stays False.
+
+    ``limits`` 为某标准版本的限值映射; 缺省时使用内置默认限值. 判定结果由调用方
+    随监测数据一并快照入库, 之后标准调整不影响历史结论.
     """
     pollutant = get_pollutant(pollutant_code)
     if pollutant is None:
@@ -30,7 +34,7 @@ def evaluate(pollutant_code, period, value):
     if value is None:
         raise ValueError("监测数值不能为空")
 
-    limit = get_limit(pollutant_code, period)
+    limit = get_limit(pollutant_code, period, limits)
     if limit is None:
         return {
             "applicable": False,
@@ -39,7 +43,8 @@ def evaluate(pollutant_code, period, value):
             "ratio": None,
             "level": None,
             "unit": pollutant["unit"],
-            "message": "%s 未设定小时均值限值, 仅记录数值" % pollutant["label"],
+            "message": "%s 未设定%s限值, 仅记录数值"
+            % (pollutant["label"], PERIOD_LABELS.get(period, period)),
         }
 
     ratio = round(float(value) / float(limit), 3)

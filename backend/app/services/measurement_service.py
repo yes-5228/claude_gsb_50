@@ -4,6 +4,7 @@ from ..domain.standards import get_pollutant
 from ..errors import ConflictError, NotFoundError, ValidationError
 from ..extensions import db
 from ..models import Exceedance, Measurement, Station
+from . import standard_service
 
 
 def get_measurement(measurement_id):
@@ -13,8 +14,26 @@ def get_measurement(measurement_id):
     return measurement
 
 
-def preview_entries(period, entries):
-    """Dry-run evaluation for the entry form (no database writes)."""
+def _standard_payload(version):
+    """录入响应中携带的判定依据说明."""
+    if version is None:
+        return None
+    return {
+        "id": version.id,
+        "name": version.name,
+        "grade": version.grade,
+        "grade_label": version.grade_label(),
+        "display_name": version.display_name(),
+        "effective_from": version.effective_from.isoformat(timespec="seconds"),
+    }
+
+
+def preview_entries(period, entries, measured_at=None):
+    """Dry-run evaluation for the entry form (no database writes).
+
+    按监测时间匹配当时生效的标准版本; 未传监测时间时按当前时间解析.
+    """
+    version, limits = standard_service.resolve_limits(measured_at)
     results = []
     for entry in entries:
         pollutant = str(entry.get("pollutant", "")).upper()
@@ -27,7 +46,7 @@ def preview_entries(period, entries):
             raise ValidationError(
                 "%s 监测值必须为数字" % meta["label"], fields={pollutant: "invalid_number"}
             )
-        evaluation = exceedance_rules.evaluate(pollutant, period, value)
+        evaluation = exceedance_rules.evaluate(pollutant, period, value, limits)
         results.append(
             {
                 "pollutant": pollutant,
@@ -37,7 +56,12 @@ def preview_entries(period, entries):
                 **evaluation,
             }
         )
-    return {"period": period, "results": results, "summary": exceedance_rules.summarize(results)}
+    return {
+        "period": period,
+        "results": results,
+        "summary": exceedance_rules.summarize(results),
+        "standard": _standard_payload(version),
+    }
 
 
 def _load_station(station_id):
@@ -57,6 +81,10 @@ def record_entries(station_id, measured_at, period, entries, data_source="manual
     station = _load_station(station_id)
     if not entries:
         raise ValidationError("至少需要录入一条监测数据", fields={"entries": "empty"})
+
+    # 按监测时间匹配当时生效的标准版本, 判定结论随数据快照入库;
+    # 之后标准版本调整不回溯改写本次判定.
+    version, limits = standard_service.resolve_limits(measured_at)
 
     existing = {
         row.pollutant: row
@@ -87,7 +115,7 @@ def record_entries(station_id, measured_at, period, entries, data_source="manual
                 "%s 监测值必须为数字" % meta["label"], fields={pollutant: "invalid_number"}
             )
 
-        evaluation = exceedance_rules.evaluate(pollutant, period, value)
+        evaluation = exceedance_rules.evaluate(pollutant, period, value, limits)
         evaluated.append(
             {
                 "pollutant": pollutant,
@@ -125,6 +153,7 @@ def record_entries(station_id, measured_at, period, entries, data_source="manual
         record.data_source = data_source
         record.recorder = entry.get("recorder") or recorder
         record.remark = entry.get("remark") or remark
+        record.standard_version_id = version.id if version else None
 
         _sync_exceedance(record, meta, evaluation)
         db.session.flush()
@@ -143,6 +172,7 @@ def record_entries(station_id, measured_at, period, entries, data_source="manual
         "station": station.to_option(),
         "measured_at": measured_at.isoformat(timespec="seconds"),
         "period": period,
+        "standard": _standard_payload(version),
         "created": created,
         "updated": updated,
         "exceedances": [item for item in exceeded if item],

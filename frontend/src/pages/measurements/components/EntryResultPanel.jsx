@@ -158,6 +158,12 @@ export default function EntryResultPanel({ result, summary, onClose }) {
           </div>
         )}
 
+        {payload.standard ? (
+          <div className="small muted">
+            判定依据: {payload.standard.display_name} (按监测时间匹配的标准版本, 结论已随数据快照)
+          </div>
+        ) : null}
+
         <ResultTable columns={columns} rows={rows} />
 
         {payload.duplicates?.length ? (
