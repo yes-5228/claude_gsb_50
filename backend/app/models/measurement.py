@@ -29,8 +29,13 @@ class Measurement(TimestampMixin, db.Model):
     data_source = db.Column(db.String(16), nullable=False, default="manual")
     recorder = db.Column(db.String(64))
     remark = db.Column(db.Text)
+    # 判定所依据的限值标准版本(快照指针); 标准调整后历史记录保持不变
+    standard_version_id = db.Column(
+        db.Integer, db.ForeignKey("standard_versions.id", ondelete="RESTRICT")
+    )
 
     station = db.relationship("Station", back_populates="measurements")
+    standard_version = db.relationship("StandardVersion")
     exceedance = db.relationship(
         "Exceedance",
         back_populates="measurement",
@@ -65,6 +70,10 @@ class Measurement(TimestampMixin, db.Model):
             "updated_at": iso(self.updated_at),
             "exceedance_id": self.exceedance.id if self.exceedance else None,
             "exceedance_status": self.exceedance.status if self.exceedance else None,
+            "standard_version_id": self.standard_version_id,
+            "standard_version": (
+                self.standard_version.to_ref() if self.standard_version else None
+            ),
         }
         if include_station and self.station:
             payload["station"] = {

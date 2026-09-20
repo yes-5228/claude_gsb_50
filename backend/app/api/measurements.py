@@ -25,14 +25,18 @@ def measurement_summary():
 
 @bp.post("/preview")
 def preview():
-    """干跑校验: 录入表单实时预览超标情况, 不写库."""
+    """干跑校验: 录入表单实时预览超标情况, 不写库.
+
+    按监测时间匹配适用标准版本, 与正式录入的判定口径保持一致。
+    """
     data = json_payload()
     validator = Validator(data)
     period = validator.choice("period", "数据周期", choices=tuple(PERIOD_LABELS.keys()),
                               required=True, default="hourly")
+    measured_at = validator.datetime_field("measured_at", "监测时间", required=False)
     validator.raise_if_invalid()
     entries = list_payload("entries", data)
-    return measurement_service.preview_entries(period or "hourly", entries)
+    return measurement_service.preview_entries(period or "hourly", entries, measured_at)
 
 
 @bp.post("/entries")

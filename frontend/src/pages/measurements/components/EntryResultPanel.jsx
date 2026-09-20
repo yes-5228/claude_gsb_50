@@ -128,6 +128,12 @@ export default function EntryResultPanel({ result, summary, onClose }) {
       }
     >
       <div className="stack">
+        {payload.standard_version ? (
+          <Alert tone="info">
+            判定依据: {payload.standard_version.name}({payload.standard_version.grade_label})
+            , 限值快照已随数据保存, 后续标准调整不影响本次结论。
+          </Alert>
+        ) : null}
         {isPreview ? (
           <Alert tone={payload.summary.exceeded_count ? 'warning' : 'success'}>
             共校验 {payload.summary.total} 个因子, 其中 {payload.summary.exceeded_count} 个超过限值

@@ -1,9 +1,16 @@
-"""监测数据录入业务逻辑 (含超标自动判定)."""
+"""监测数据录入业务逻辑 (含超标自动判定).
+
+判定所依据的限值标准按监测时间从版本库中解析 (standard_service.require_version),
+限值与版本指针随数据一并快照, 标准版本后续调整不影响已入库数据的判定结论。
+"""
+from datetime import datetime
+
 from ..domain import exceedance_rules
 from ..domain.standards import get_pollutant
 from ..errors import ConflictError, NotFoundError, ValidationError
 from ..extensions import db
 from ..models import Exceedance, Measurement, Station
+from . import standard_service
 
 
 def get_measurement(measurement_id):
@@ -13,21 +20,34 @@ def get_measurement(measurement_id):
     return measurement
 
 
-def preview_entries(period, entries):
-    """Dry-run evaluation for the entry form (no database writes)."""
+def _evaluate_entry(entry, period, limits):
+    """Validate one entry payload and evaluate it against the resolved limits."""
+    pollutant = str(entry.get("pollutant", "")).upper()
+    meta = get_pollutant(pollutant)
+    if meta is None:
+        raise ValidationError("未知监测因子: %s" % entry.get("pollutant"), fields={"pollutant": "unknown"})
+    try:
+        value = float(entry.get("value"))
+    except (TypeError, ValueError):
+        raise ValidationError(
+            "%s 监测值必须为数字" % meta["label"], fields={pollutant: "invalid_number"}
+        )
+    evaluation = exceedance_rules.evaluate(
+        pollutant, period, value, limits.get((pollutant, period))
+    )
+    return pollutant, meta, value, evaluation
+
+
+def preview_entries(period, entries, measured_at=None):
+    """Dry-run evaluation for the entry form (no database writes).
+
+    ``measured_at`` 决定适用哪一版限值标准; 缺省时按当前时间解析。
+    """
+    version = standard_service.require_version(measured_at or datetime.now())
+    limits = version.limit_map()
     results = []
     for entry in entries:
-        pollutant = str(entry.get("pollutant", "")).upper()
-        meta = get_pollutant(pollutant)
-        if meta is None:
-            raise ValidationError("未知监测因子: %s" % entry.get("pollutant"), fields={"pollutant": "unknown"})
-        try:
-            value = float(entry.get("value"))
-        except (TypeError, ValueError):
-            raise ValidationError(
-                "%s 监测值必须为数字" % meta["label"], fields={pollutant: "invalid_number"}
-            )
-        evaluation = exceedance_rules.evaluate(pollutant, period, value)
+        pollutant, meta, value, evaluation = _evaluate_entry(entry, period, limits)
         results.append(
             {
                 "pollutant": pollutant,
@@ -37,7 +57,12 @@ def preview_entries(period, entries):
                 **evaluation,
             }
         )
-    return {"period": period, "results": results, "summary": exceedance_rules.summarize(results)}
+    return {
+        "period": period,
+        "results": results,
+        "summary": exceedance_rules.summarize(results),
+        "standard_version": version.to_ref(),
+    }
 
 
 def _load_station(station_id):
@@ -57,6 +82,10 @@ def record_entries(station_id, measured_at, period, entries, data_source="manual
     station = _load_station(station_id)
     if not entries:
         raise ValidationError("至少需要录入一条监测数据", fields={"entries": "empty"})
+
+    # 按监测时间匹配当时有效的限值标准, 判定结果随数据快照, 不随标准调整而变化
+    version = standard_service.require_version(measured_at)
+    limits = version.limit_map()
 
     existing = {
         row.pollutant: row
@@ -80,14 +109,7 @@ def record_entries(station_id, measured_at, period, entries, data_source="manual
             )
         seen.add(pollutant)
 
-        try:
-            value = float(entry.get("value"))
-        except (TypeError, ValueError):
-            raise ValidationError(
-                "%s 监测值必须为数字" % meta["label"], fields={pollutant: "invalid_number"}
-            )
-
-        evaluation = exceedance_rules.evaluate(pollutant, period, value)
+        _, _, value, evaluation = _evaluate_entry(entry, period, limits)
         evaluated.append(
             {
                 "pollutant": pollutant,
@@ -125,8 +147,9 @@ def record_entries(station_id, measured_at, period, entries, data_source="manual
         record.data_source = data_source
         record.recorder = entry.get("recorder") or recorder
         record.remark = entry.get("remark") or remark
+        record.standard_version_id = version.id
 
-        _sync_exceedance(record, meta, evaluation)
+        _sync_exceedance(record, meta, evaluation, version)
         db.session.flush()
         (created if is_new else updated).append(record.to_dict(include_station=True))
         if evaluation["exceeded"]:
@@ -148,6 +171,7 @@ def record_entries(station_id, measured_at, period, entries, data_source="manual
         "exceedances": [item for item in exceeded if item],
         "duplicates": duplicates,
         "evaluations": evaluated,
+        "standard_version": version.to_ref(),
         "summary": {
             "created_count": len(created),
             "updated_count": len(updated),
@@ -157,7 +181,7 @@ def record_entries(station_id, measured_at, period, entries, data_source="manual
     }
 
 
-def _sync_exceedance(record, meta, evaluation):
+def _sync_exceedance(record, meta, evaluation, version):
     """Create / refresh / drop the exceedance row attached to a measurement."""
     if evaluation["exceeded"]:
         if record.exceedance is None:
@@ -171,6 +195,7 @@ def _sync_exceedance(record, meta, evaluation):
                 exceed_ratio=evaluation["ratio"],
                 level=evaluation["level"],
                 status="pending",
+                standard_version_id=version.id,
             )
         else:
             record.exceedance.value = record.value
@@ -178,6 +203,7 @@ def _sync_exceedance(record, meta, evaluation):
             record.exceedance.exceed_ratio = evaluation["ratio"]
             record.exceedance.level = evaluation["level"]
             record.exceedance.measured_at = record.measured_at
+            record.exceedance.standard_version_id = version.id
     elif record.exceedance is not None:
         db.session.delete(record.exceedance)
 

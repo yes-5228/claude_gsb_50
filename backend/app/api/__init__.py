@@ -3,6 +3,7 @@ from .exceedances import bp as exceedances_bp
 from .measurements import bp as measurements_bp
 from .meta import bp as meta_bp
 from .query import bp as query_bp
+from .standards import bp as standards_bp
 from .stations import bp as stations_bp
 
 BLUEPRINTS = (
@@ -11,6 +12,7 @@ BLUEPRINTS = (
     (measurements_bp, "/api/measurements"),
     (exceedances_bp, "/api/exceedances"),
     (query_bp, "/api/query"),
+    (standards_bp, "/api/standards"),
 )
 
 

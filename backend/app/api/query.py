@@ -3,7 +3,7 @@ from flask import Blueprint, current_app, request
 
 from ..domain.constants import DATA_SOURCE_LABELS, PERIOD_LABELS, STATION_TYPE_LABELS
 from ..domain.standards import POLLUTANTS
-from ..services import query_service
+from ..services import query_service, standard_service
 from ..utils.pagination import paginate_query
 
 bp = Blueprint("query", __name__)
@@ -50,9 +50,15 @@ def query_export():
 @bp.get("/options")
 def query_options():
     payload = query_service.option_payload()
+    current = standard_service.current_version()
+    limit_map = current.limit_map() if current else {}
     payload["pollutants"] = [
-        {"value": item["code"], "label": item["label"], "unit": item["unit"],
-         "limits": item["limits"]}
+        {
+            "value": item["code"],
+            "label": item["label"],
+            "unit": item["unit"],
+            "limits": {period: limit_map.get((item["code"], period)) for period in PERIOD_LABELS},
+        }
         for item in POLLUTANTS.values()
     ]
     payload["periods"] = [{"value": key, "label": label} for key, label in PERIOD_LABELS.items()]

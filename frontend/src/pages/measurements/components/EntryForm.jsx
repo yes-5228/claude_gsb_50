@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createEntries, previewEntries } from '../../../api/measurements.js'
+import { resolveStandard } from '../../../api/standards.js'
 import { SectionCard } from '../../../components/common/Card.jsx'
 import { Checkbox, Field, Input, Select } from '../../../components/common/FormField.jsx'
 import { Alert, Loading } from '../../../components/common/Feedback.jsx'
@@ -38,6 +39,8 @@ export default function EntryForm({ onPreview, onSubmitted }) {
   const [message, setMessage] = useState(null)
   const [busy, setBusy] = useState(null)
   const [evaluations, setEvaluations] = useState({})
+  // 监测时间匹配结果: undefined = 解析中, null = 无适用版本, 对象 = 适用版本
+  const [applicable, setApplicable] = useState()
 
   const pollutants = pollutantData?.items ?? []
 
@@ -47,13 +50,43 @@ export default function EntryForm({ onPreview, onSubmitted }) {
     }
   }, [stationData, form.station_id])
 
+  // 监测时间变化时, 实时解析当时有效的标准版本, 限值提示与判定口径随之切换
+  useEffect(() => {
+    if (!form.measured_at) {
+      setApplicable(undefined)
+      return undefined
+    }
+    let cancelled = false
+    resolveStandard(form.measured_at)
+      .then((result) => {
+        if (!cancelled) setApplicable(result.version ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setApplicable(undefined)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [form.measured_at])
+
+  const applicableLimits = useMemo(() => {
+    const map = {}
+    ;(applicable?.limits ?? []).forEach((row) => {
+      map[row.pollutant] = row.limits
+    })
+    return map
+  }, [applicable])
+
   const limitHint = useCallback(
     (pollutant) => {
-      const limit = pollutant.limits?.[form.period]
+      if (applicable === null) return '该时刻无适用标准, 无法判定'
+      // 优先使用按监测时间匹配到的版本限值; 解析中回退到当前版本
+      const limits = applicable ? applicableLimits[pollutant.code] : pollutant.limits
+      const limit = limits?.[form.period]
       if (limit === null || limit === undefined) return '该周期未设限值, 仅记录数值'
       return `限值 ${formatNumber(limit)} ${pollutant.unit}`
     },
-    [form.period]
+    [applicable, applicableLimits, form.period]
   )
 
   const filled = useMemo(
@@ -104,7 +137,11 @@ export default function EntryForm({ onPreview, onSubmitted }) {
     if (!validate()) return
     setBusy('preview')
     try {
-      const result = await previewEntries({ period: form.period, entries })
+      const result = await previewEntries({
+        period: form.period,
+        measured_at: form.measured_at,
+        entries
+      })
       const map = {}
       result.results.forEach((item) => {
         map[item.pollutant] = item
@@ -220,6 +257,17 @@ export default function EntryForm({ onPreview, onSubmitted }) {
             <span className="hint">留空的因子不会写入</span>
           </div>
           <div className="card-body">
+            {applicable ? (
+              <Alert tone="info">
+                适用标准: {applicable.name}({applicable.grade_label}), 按监测时间自动匹配;
+                判定结果与限值快照将随数据保存, 后续标准调整不影响本次结论。
+              </Alert>
+            ) : null}
+            {applicable === null ? (
+              <Alert tone="warning">
+                所选监测时间不在任何标准版本的生效区间内, 请先在“限值标准”模块配置后再录入。
+              </Alert>
+            ) : null}
             {errors.entries ? <Alert tone="error">{errors.entries}</Alert> : null}
             <div className="form-grid">
               {pollutants.map((pollutant) => {

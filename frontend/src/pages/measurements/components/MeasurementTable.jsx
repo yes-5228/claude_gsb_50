@@ -33,7 +33,22 @@ export default function MeasurementTable({ rows, loading, onDelete }) {
       key: 'limit_value',
       title: '限值',
       align: 'right',
-      render: (row) => (row.limit_value === null ? <span className="muted small">无限值</span> : formatNumber(row.limit_value))
+      render: (row) => (
+        <div>
+          <div>
+            {row.limit_value === null ? (
+              <span className="muted small">无限值</span>
+            ) : (
+              formatNumber(row.limit_value)
+            )}
+          </div>
+          {row.standard_version ? (
+            <div className="small muted" title={`判定依据: ${row.standard_version.name}`}>
+              {row.standard_version.grade_label}
+            </div>
+          ) : null}
+        </div>
+      )
     },
     {
       key: 'is_exceeded',

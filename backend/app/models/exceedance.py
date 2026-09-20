@@ -33,9 +33,14 @@ class Exceedance(TimestampMixin, db.Model):
     annotator = db.Column(db.String(64))
     annotated_at = db.Column(db.DateTime)
     measured_at = db.Column(db.DateTime, nullable=False, index=True)
+    # 判定所依据的限值标准版本(快照指针); 标准调整后历史记录保持不变
+    standard_version_id = db.Column(
+        db.Integer, db.ForeignKey("standard_versions.id", ondelete="RESTRICT")
+    )
 
     measurement = db.relationship("Measurement", back_populates="exceedance")
     station = db.relationship("Station", back_populates="exceedances")
+    standard_version = db.relationship("StandardVersion")
 
     def to_dict(self, include_relations=False):
         payload = {
@@ -62,6 +67,10 @@ class Exceedance(TimestampMixin, db.Model):
             "station_name": self.station.name if self.station else None,
             "station_code": self.station.code if self.station else None,
             "unit": self.measurement.unit if self.measurement else None,
+            "standard_version_id": self.standard_version_id,
+            "standard_version": (
+                self.standard_version.to_ref() if self.standard_version else None
+            ),
         }
         if include_relations and self.measurement:
             payload["measurement"] = self.measurement.to_dict(include_station=True)

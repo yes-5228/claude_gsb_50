@@ -5,6 +5,42 @@ from datetime import date, datetime, timedelta
 from .extensions import db
 from .models import Exceedance, Measurement, Station
 
+# 演示用标准版本: 展示“已废止 / 未来生效”两种状态 (现行版本由初始化自动写入)
+DEMO_EXTRA_VERSIONS = [
+    {
+        "code": "GB3095-1996-L2",
+        "name": "GB 3095-1996 环境空气质量标准",
+        "grade": "level2",
+        "effective_from": datetime(2000, 1, 1, 0, 0),
+        "effective_to": datetime(2016, 1, 1, 0, 0),
+        "remark": "已被 GB 3095-2012 替代, 保留用于追溯早期数据的判定依据",
+        "limits": {
+            "PM25": {"daily": None, "hourly": None},  # 1996 版未纳入 PM2.5
+            "PM10": {"daily": 150.0, "hourly": None},
+            "SO2": {"daily": 150.0, "hourly": 500.0},
+            "NO2": {"daily": 120.0, "hourly": 240.0},
+            "CO": {"daily": 4.0, "hourly": 10.0},
+            "O3": {"daily": None, "hourly": 160.0},
+        },
+    },
+    {
+        "code": "GB3095-2012-L2-2027",
+        "name": "GB 3095-2012 环境空气质量标准(2027 年修订)",
+        "grade": "level2",
+        "effective_from": datetime(2027, 1, 1, 0, 0),
+        "effective_to": None,
+        "remark": "演示用未来版本: 部分因子限值加严, 2027-01-01 起自动成为适用标准",
+        "limits": {
+            "PM25": {"daily": 60.0, "hourly": None},
+            "PM10": {"daily": 120.0, "hourly": None},
+            "SO2": {"daily": 120.0, "hourly": 400.0},
+            "NO2": {"daily": 80.0, "hourly": 200.0},
+            "CO": {"daily": 4.0, "hourly": 10.0},
+            "O3": {"daily": 150.0, "hourly": 180.0},
+        },
+    },
+]
+
 DEMO_STATIONS = [
     {
         "code": "SZ-AQ-001", "name": "市民中心站", "area": "福田区",
@@ -77,7 +113,7 @@ def _value(pollutant, period, station_type, rng):
 
 def seed_demo_data(days=5, rng=None, recorder_pool=RECORDERS):
     """Generate demo stations and monitoring records through the normal service path."""
-    from .services import measurement_service
+    from .services import measurement_service, standard_service
 
     rng = rng or random.Random(20260914)
     created_stations = []
@@ -86,6 +122,8 @@ def seed_demo_data(days=5, rng=None, recorder_pool=RECORDERS):
         db.session.add(station)
         created_stations.append(station)
     db.session.commit()
+
+    _seed_demo_versions(standard_service)
 
     today = date.today()
     totals = {"stations": len(created_stations), "measurements": 0, "exceedances": 0}
@@ -147,9 +185,41 @@ def seed_demo_data(days=5, rng=None, recorder_pool=RECORDERS):
     return totals
 
 
+def _seed_demo_versions(standard_service):
+    """Create the retired / scheduled demo versions (idempotent by code)."""
+    from .models import StandardVersion
+
+    for item in DEMO_EXTRA_VERSIONS:
+        if StandardVersion.query.filter_by(code=item["code"]).first() is not None:
+            continue
+        standard_service.create_version(dict(item))
+
+
 def reset_database():
     db.drop_all()
     db.create_all()
+
+
+def _ensure_version_columns():
+    """Lightweight migration: add standard_version_id to pre-versioning databases."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(db.engine)
+    targets = ("measurements", "exceedances")
+    existing_tables = set(inspector.get_table_names())
+    with db.engine.begin() as connection:
+        for table in targets:
+            if table not in existing_tables:
+                continue
+            columns = {column["name"] for column in inspector.get_columns(table)}
+            if "standard_version_id" in columns:
+                continue
+            connection.execute(
+                text(
+                    "ALTER TABLE %s ADD COLUMN standard_version_id "
+                    "INTEGER REFERENCES standard_versions(id)" % table
+                )
+            )
 
 
 def ensure_bootstrap(app):
@@ -162,6 +232,11 @@ def ensure_bootstrap(app):
         try:
             if auto_init:
                 db.create_all()
+                _ensure_version_columns()
+            from .services import standard_service
+
+            standard_service.ensure_default_versions()
+            standard_service.backfill_measurement_versions()
             if auto_seed and db.session.query(Station.id).first() is None:
                 app.logger.info("seeding demo data ...")
                 seed_demo_data()

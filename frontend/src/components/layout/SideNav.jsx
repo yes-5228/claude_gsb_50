@@ -24,8 +24,8 @@ export default function SideNav() {
         ))}
       </nav>
       <div className="sidebar-footer">
-        <div>GB 3095-2012 二级标准</div>
-        <div>v1.0.0 · Flask + React</div>
+        <div>限值标准版本化管理</div>
+        <div>v1.1.0 · Flask + React</div>
       </div>
     </aside>
   )

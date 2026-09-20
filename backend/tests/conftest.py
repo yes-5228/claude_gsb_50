@@ -3,7 +3,7 @@ import pytest
 from app import create_app
 from app.extensions import db
 from app.models import Station
-from app.services import station_service
+from app.services import standard_service, station_service
 
 
 @pytest.fixture
@@ -11,6 +11,7 @@ def app():
     application = create_app("testing")
     with application.app_context():
         db.create_all()
+        standard_service.ensure_default_versions()
         yield application
         db.session.remove()
         db.drop_all()

@@ -18,6 +18,11 @@ EXCEEDANCE_LEVEL_LABELS = {"light": "轻度超标", "moderate": "中度超标", 
 
 EXCEEDANCE_STATUS_LABELS = {"pending": "待标注", "confirmed": "已确认", "ignored": "已忽略"}
 
+STANDARD_GRADE_LABELS = {"level1": "一级标准", "level2": "二级标准"}
+
+# 标准版本状态(按生效区间与当前时间推导, 不落库)
+STANDARD_STATUS_LABELS = {"active": "现行有效", "scheduled": "未来生效", "retired": "已废止"}
+
 
 def as_options(label_map):
     return [{"value": key, "label": label} for key, label in label_map.items()]
@@ -31,6 +36,8 @@ def options_payload():
         "data_source": as_options(DATA_SOURCE_LABELS),
         "exceedance_level": as_options(EXCEEDANCE_LEVEL_LABELS),
         "exceedance_status": as_options(EXCEEDANCE_STATUS_LABELS),
+        "standard_grade": as_options(STANDARD_GRADE_LABELS),
+        "standard_status": as_options(STANDARD_STATUS_LABELS),
     }
 
 

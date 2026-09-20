@@ -1,8 +1,9 @@
 # 空气监测点数据录入系统
 
-面向空气质量监测业务的**监测点台账 + 监测数据录入 + 超标记录标注 + 数据查询**一体化系统。
+面向空气质量监测业务的**监测点台账 + 监测数据录入 + 超标记录标注 + 数据查询 + 限值标准版本管理**一体化系统。
 后端使用 Flask + SQLAlchemy 以蓝图/服务分层组织, 前端使用 React + Vite 按业务模块拆分页面,
-超标判定严格依据 **GB 3095-2012《环境空气质量标准》二级浓度限值** 自动完成。
+超标判定依据**限值标准版本库**自动完成: 录入时按监测时间匹配当时有效的标准版本,
+标准调整后历史数据的判定结论与超标等级保持不变。
 
 ## 功能模块
 
@@ -10,14 +11,16 @@
 | --- | --- | --- |
 | 运行概览 | `/overview` | 监测点规模、数据总量、超标与待标注统计、近 7 日数据量趋势、待办超标列表 |
 | 监测点台账 | `/stations` | 台账增删改查、区域/类型/状态筛选、点位详情与分因子统计、级联清理关联数据 |
-| 监测数据录入 | `/measurements` | 按“监测点 + 时刻 + 周期”成组录入多因子浓度、超标校验预览、重复数据覆盖、录入结果回执 |
+| 监测数据录入 | `/measurements` | 按“监测点 + 时刻 + 周期”成组录入多因子浓度、按监测时间匹配标准版本、超标校验预览、重复数据覆盖、录入结果回执 |
 | 超标记录标注 | `/exceedances` | 超标自动建单、单条/批量标注(确认 / 忽略 / 重置)、等级人工修正、标注留痕与统计 |
 | 数据查询 | `/query` | 多条件组合检索、聚合统计(按因子/站点/区域/日/月等)、分页浏览、CSV 导出 |
+| 限值标准 | `/standards` | 标准版本维护(等级 + 生效区间 + 因子限值矩阵)、版本时间线、适用标准试算、引用保护 |
 
 设计要点:
 
-- **超标自动判定**: 数据写入时即按“因子 + 数据周期”取用限值, 计算超标倍数并分级, 同步生成待标注超标记录; 修正数据后超标记录自动更新或撤销。
-- **业务规则集中在后端**: 限值与分级规则位于 `backend/app/domain/`, 前端仅做展示与前置校验, 避免规则分叉。
+- **限值标准版本化**: 限值按“标准版本”维护(等级 + 生效区间 + 因子 × 周期限值矩阵), 同一时刻只有一个有效版本; 录入数据时按监测时间匹配适用版本, 限值快照与版本指针随数据保存, 标准调整不回溯历史数据。
+- **超标自动判定**: 数据写入时即按匹配到的版本限值计算超标倍数并分级, 同步生成待标注超标记录; 修正数据后超标记录自动更新或撤销。
+- **业务规则集中在后端**: 因子元数据与分级规则位于 `backend/app/domain/`, 版本解析与维护位于 `backend/app/services/standard_service.py`, 前端仅做展示与前置校验, 避免规则分叉。
 - **模块化组织**: 后端按 `api / services / models / domain / utils` 分层; 前端每个业务模块独占目录, 公共能力沉淀在 `components/`、`hooks/`、`api/`。
 
 ## 技术栈
@@ -28,7 +31,7 @@
 | 数据库 | SQLite(默认, 零依赖) / PostgreSQL 16(可选, compose 覆盖文件) |
 | 前端 | React 18 · React Router 6 · Vite 7 · Axios · 原生 CSS(设计令牌 + 组件类) |
 | 部署 | Docker 多阶段构建 · Nginx 静态托管与 `/api` 反向代理 · docker compose |
-| 测试 | Pytest(43 个后端用例: 接口 + 领域规则) |
+| 测试 | Pytest(59 个后端用例: 接口 + 领域规则 + 标准版本) |
 
 ## 目录结构
 
@@ -42,10 +45,10 @@
 │   │   ├── errors.py            # 统一异常与 JSON 错误响应
 │   │   ├── commands.py          # flask init-db / seed / reset-db / stats
 │   │   ├── seed.py              # 演示数据生成与启动引导
-│   │   ├── domain/              # 业务规则: 因子限值、枚举、超标分级
-│   │   ├── models/              # Station / Measurement / Exceedance
-│   │   ├── services/            # 台账、录入、标注、查询统计业务逻辑
-│   │   ├── api/                 # 蓝图: meta / stations / measurements / exceedances / query
+│   │   ├── domain/              # 业务规则: 因子元数据、枚举、超标分级
+│   │   ├── models/              # Station / Measurement / Exceedance / StandardVersion
+│   │   ├── services/            # 台账、录入、标注、查询统计、标准版本业务逻辑
+│   │   ├── api/                 # 蓝图: meta / stations / measurements / exceedances / query / standards
 │   │   └── utils/               # 校验器、分页、CSV 导出
 │   ├── tests/                   # Pytest 用例
 │   ├── Dockerfile · docker-entrypoint.sh · requirements*.txt
@@ -56,7 +59,7 @@
 │   │   ├── components/          # layout(侧边栏/顶栏) 与 common(表格/分页/弹窗/表单等)
 │   │   ├── constants/           # 路由、标签与色板映射
 │   │   ├── hooks/               # useListQuery / useAsyncData / useOptions
-│   │   ├── pages/               # overview / stations / measurements / exceedances / query
+│   │   ├── pages/               # overview / stations / measurements / exceedances / query / standards
 │   │   ├── styles/global.css    # 设计令牌与公共样式
 │   │   └── utils/               # 时间/数值格式化、下载
 │   ├── Dockerfile · nginx.conf · vite.config.js
@@ -121,11 +124,30 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 
 覆盖文件会新增 `postgres:16-alpine` 服务并把后端 `DATABASE_URL` 指向它; 后端容器会等待数据库健康检查通过后再建表初始化。
 
-## 超标判定规则
+## 限值标准版本管理
 
-判定逻辑位于 `backend/app/domain/exceedance_rules.py`, 限值定义位于 `backend/app/domain/standards.py`。
+判定逻辑位于 `backend/app/domain/exceedance_rules.py`(纯函数), 版本解析与维护位于
+`backend/app/services/standard_service.py`, 因子元数据位于 `backend/app/domain/standards.py`。
 
-**GB 3095-2012 二级浓度限值**
+**核心规则**
+
+- **版本化维护**: 每一版标准包含名称、等级(一级/二级)、生效区间(`effective_from` ~ `effective_to`, 空表示至今)与完整的“因子 × 周期”限值矩阵; 同一时刻全局只有一个有效版本, 生效区间不允许重叠。
+- **自动衔接**: 新建不设失效时间的版本时, 现行版本的失效时间自动衔接为新版本生效时间, 形成连续版本链。
+- **按监测时间匹配**: 录入(含预览)时按 `measured_at` 匹配 `effective_from <= measured_at < effective_to` 的版本进行判定; 监测时间不在任何版本区间内时拒绝录入并提示先配置标准。
+- **历史结论不变**: 判定结果(限值、超标倍数、是否超标、等级)与版本指针随数据快照保存; 修改/新建标准版本只影响之后的录入, 已入库数据永不回溯重算; 已被监测数据引用的版本禁止删除。
+- **等级分级**: 超标倍数 = 监测值 / 限值; `1.0 ~ 1.5 倍` 为轻度超标, `1.5 ~ 2.0 倍` 为中度超标, `≥ 2.0 倍` 为重度超标。
+- **无限值周期**: 未设限值的因子-周期(如 PM2.5 小时值)仅记录数值, 不参与超标判定, 避免误报。
+- **标注状态**: `待标注(pending)` 由系统自动创建, 人工标注为 `已确认(confirmed)` 或 `已忽略(ignored)`; 确认与忽略都必须填写标注说明, 用于后续追溯。
+
+**内置版本时间线**(演示数据)
+
+| 版本 | 等级 | 生效区间 | 状态 |
+| --- | --- | --- | --- |
+| GB 3095-1996(二级) | 二级 | 2000-01-01 ~ 2016-01-01 | 已废止 |
+| GB 3095-2012(二级) | 二级 | 2016-01-01 ~ 2027-01-01 | 现行有效 |
+| GB 3095-2012(2027 年修订·二级) | 二级 | 2027-01-01 起 | 未来生效 |
+
+**GB 3095-2012 二级浓度限值**(系统初始化默认版本)
 
 | 监测因子 | 1 小时平均 | 24 小时平均 | 单位 |
 | --- | --- | --- | --- |
@@ -135,11 +157,6 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 | NO₂ | 200 | 80 | μg/m³ |
 | CO | 10 | 4 | mg/m³ |
 | O₃ | 200 | 160 | μg/m³ |
-
-- **判定**: `监测值 > 限值` 即判为超标, 记录限值快照与原值, 避免限值调整后历史数据失真。
-- **分级**: 超标倍数 = 监测值 / 限值; `1.0 ~ 1.5 倍` 为轻度超标, `1.5 ~ 2.0 倍` 为中度超标, `≥ 2.0 倍` 为重度超标。
-- **无 1 小时限值的因子**(PM2.5、PM10 小时值)仅记录数值, 不参与超标判定, 避免误报。
-- **标注状态**: `待标注(pending)` 由系统自动创建, 人工标注为 `已确认(confirmed)` 或 `已忽略(ignored)`; 确认与忽略都必须填写标注说明, 用于后续追溯。
 
 ## API 概览
 
@@ -168,6 +185,9 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 | GET | `/api/query/measurements` | 高级条件检索 |
 | GET | `/api/query/statistics` | 聚合统计(`group_by` + `metric`) |
 | GET | `/api/query/export` | 查询结果导出 CSV |
+| GET/POST | `/api/standards/versions` | 标准版本列表(含限值矩阵) / 新建版本 |
+| GET/PUT/DELETE | `/api/standards/versions/{id}` | 版本详情(含引用计数) / 更新 / 删除(被引用时 409) |
+| GET | `/api/standards/resolve` | 按监测时间查询适用的标准版本(`measured_at` 参数) |
 
 `POST /api/measurements/entries` 请求示例:
 
@@ -188,7 +208,7 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 }
 ```
 
-响应会返回本次新增/更新条数、超标记录、重复项与逐因子判定结果:
+响应会返回本次新增/更新条数、超标记录、重复项、逐因子判定结果与判定所依据的标准版本:
 
 ```json
 {
@@ -196,6 +216,7 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
   "updated": [],
   "exceedances": [ { "pollutant": "SO2", "level": "moderate", "exceed_ratio": 1.28 } ],
   "duplicates": [],
+  "standard_version": { "id": 1, "code": "GB3095-2012-L2", "grade_label": "二级标准" },
   "summary": { "created_count": 3, "updated_count": 0, "exceeded_count": 1, "duplicate_count": 0 }
 }
 ```
@@ -205,10 +226,13 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 | 表 | 关键字段 | 说明 |
 | --- | --- | --- |
 | `stations` | `code`(唯一) `name` `area` `station_type` `status` `longitude/latitude` `installed_at` | 监测点台账 |
-| `measurements` | `station_id` `pollutant` `period` `value` `limit_value` `exceed_ratio` `is_exceeded` `measured_at` `data_source` `recorder` | 监测数据; `(station_id, pollutant, period, measured_at)` 唯一 |
-| `exceedances` | `measurement_id`(唯一) `status` `level` `note` `annotator` `annotated_at` | 超标记录与人工标注 |
+| `measurements` | `station_id` `pollutant` `period` `value` `limit_value` `exceed_ratio` `is_exceeded` `measured_at` `data_source` `recorder` `standard_version_id` | 监测数据; `(station_id, pollutant, period, measured_at)` 唯一; 判定结论与版本指针随数据快照 |
+| `exceedances` | `measurement_id`(唯一) `status` `level` `note` `annotator` `annotated_at` `standard_version_id` | 超标记录与人工标注; 等级与限值快照不随标准调整变化 |
+| `standard_versions` | `code`(唯一) `name` `grade` `effective_from` `effective_to` `remark` | 限值标准版本; 生效区间不重叠, 同一时刻一个有效版本 |
+| `standard_limits` | `version_id` `pollutant` `period` `limit_value`(可空) | 版本限值明细; `(version_id, pollutant, period)` 唯一, 空值表示该周期不设限值 |
 
-删除监测点会级联清理其监测数据与超标记录; 删除监测数据会同时删除对应超标记录。
+删除监测点会级联清理其监测数据与超标记录; 删除监测数据会同时删除对应超标记录;
+被监测数据引用的标准版本禁止删除, 未引用的版本删除不影响任何历史判定结论。
 
 ## 配置项
 
@@ -228,7 +252,7 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 
 ```bash
 cd backend
-python -m pytest -q          # 43 个用例: 台账 CRUD/级联、录入与超标判定、标注规则、查询统计与导出、元数据接口
+python -m pytest -q          # 59 个用例: 台账 CRUD/级联、录入与超标判定、标注规则、查询统计与导出、标准版本管理与历史结论不变性、元数据接口
 
 cd frontend
 npm run build                # 生产构建校验

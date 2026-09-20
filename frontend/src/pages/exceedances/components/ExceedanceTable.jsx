@@ -30,10 +30,17 @@ export default function ExceedanceTable({
       title: '监测值 / 限值',
       className: 'cell-nowrap',
       render: (row) => (
-        <span>
-          <span className="danger-text strong">{formatNumber(row.value)}</span>
-          <span className="muted"> / {formatNumber(row.limit_value)} {row.unit || ''}</span>
-        </span>
+        <div>
+          <span>
+            <span className="danger-text strong">{formatNumber(row.value)}</span>
+            <span className="muted"> / {formatNumber(row.limit_value)} {row.unit || ''}</span>
+          </span>
+          {row.standard_version ? (
+            <div className="small muted" title={`判定依据: ${row.standard_version.name}`}>
+              {row.standard_version.grade_label}
+            </div>
+          ) : null}
+        </div>
       )
     },
     {
